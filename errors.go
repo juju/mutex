@@ -10,5 +10,5 @@ import (
 var (
 	ErrTimeout   = errors.New("timeout acquiring mutex")
 	ErrCancelled = errors.New("cancelled acquiring mutex")
-	errLocked    = errors.New("alredy locked")
+	errLocked    = errors.New("already locked")
 )
