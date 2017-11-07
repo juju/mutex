@@ -5,13 +5,12 @@
 package mutex provides a named machine level mutex shareable between processes.
 [godoc-link-here]
 
-Mutexes have names, and the a mutex with the same name can only be locked by one
-instance of the mutex at a time, even across process boundaries.
+Mutexes have names. Each each name, only one mutex for that name can be
+acquired at the same time, within and across process boundaries. If a
+process dies while the mutex is held, the mutex is automatically released.
 
-If a process dies while the mutex is held, the mutex is automatically released.
-
-The linux implementation uses abstract domain sockets, windows uses a named
-semaphore, and other platforms use flock on a temp file.
-
+The Linux/MacOS implementation uses flock, while the Windows implementation
+uses a named mutex. On Linux, we also acquire an abstract domain socket for
+compatibility with older implementations.
 */
 package mutex

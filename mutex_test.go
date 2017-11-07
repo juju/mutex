@@ -4,7 +4,6 @@
 package mutex_test
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -103,6 +102,24 @@ func (s *mutexSuite) TestLockContentionWithinProcessTimeout(c *gc.C) {
 	c.Assert(err, gc.Equals, mutex.ErrTimeout)
 }
 
+func (s *mutexSuite) TestLockAfterTimeout(c *gc.C) {
+	spec := s.spec()
+	spec.Timeout = time.Nanosecond
+
+	r, err := mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	defer r.Release()
+
+	_, err = mutex.Acquire(spec)
+	c.Assert(err, gc.Equals, mutex.ErrTimeout)
+
+	r.Release()
+
+	r, err = mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	r.Release()
+}
+
 func (s *mutexSuite) TestLockContentionWithinProcessCancel(c *gc.C) {
 	cancel := make(chan struct{})
 	done := make(chan struct{})
@@ -152,11 +169,9 @@ func (s *mutexSuite) TestLockBlocks(c *gc.C) {
 	// this will block until the other process has the lock.
 	remote := LockFromAnotherProc(c, spec.Name, kill, true, true)
 
-	started := make(chan struct{})
 	acquired := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
-		close(started)
 		r, err := mutex.Acquire(spec)
 		if c.Check(err, gc.IsNil) {
 			close(acquired)
@@ -164,13 +179,6 @@ func (s *mutexSuite) TestLockBlocks(c *gc.C) {
 		}
 		close(done)
 	}()
-
-	select {
-	case <-started:
-		// good, goroutine started.
-	case <-time.After(shortWait * 2):
-		c.Fatalf("timeout waiting for goroutine to start")
-	}
 
 	// Waiting for something not to happen is inherently hard...
 	select {
@@ -191,11 +199,9 @@ func (s *mutexSuite) TestProcessReleasesWhenDead(c *gc.C) {
 	// this will block until the other process has the lock.
 	remote := LockFromAnotherProc(c, spec.Name, kill, false, false)
 
-	started := make(chan struct{})
 	acquired := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
-		close(started)
 		r, err := mutex.Acquire(spec)
 		if c.Check(err, gc.IsNil) {
 			close(acquired)
@@ -203,13 +209,6 @@ func (s *mutexSuite) TestProcessReleasesWhenDead(c *gc.C) {
 		}
 		close(done)
 	}()
-
-	select {
-	case <-started:
-		// good, goroutine started.
-	case <-time.After(shortWait * 2):
-		c.Fatalf("timeout waiting for goroutine to start")
-	}
 
 	close(kill)
 
@@ -286,17 +285,8 @@ func LockFromAnotherProc(c *gc.C, name string, kill chan struct{}, wait, unlock 
 		"MUTEX_TEST_HELPER_WAIT="+fmt.Sprint(unlock),
 		"MUTEX_TEST_HELPER_UNLOCK="+fmt.Sprint(unlock),
 	)
-	stderr, err := cmd.StderrPipe()
-	c.Assert(err, jc.ErrorIsNil)
-	go func() {
-		// Read off the pipe and spit it into the logs
-		reader := bufio.NewReader(stderr)
-		for line, err := reader.ReadString('\n'); err != nil; line, err = reader.ReadString('\n') {
-			if line != "" {
-				c.Logf(line)
-			}
-		}
-	}()
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
 	if err := cmd.Start(); err != nil {
 		c.Fatalf("error starting other proc: %v", err)
 	}
@@ -382,4 +372,8 @@ type fakeClock struct {
 
 func (f *fakeClock) After(time.Duration) <-chan time.Time {
 	return time.After(f.delay)
+}
+
+func (f *fakeClock) Now() time.Time {
+	return time.Now()
 }
