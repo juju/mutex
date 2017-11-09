@@ -29,6 +29,9 @@ type Clock interface {
 	// After waits for the duration to elapse and then sends the
 	// current time on the returned channel.
 	After(time.Duration) <-chan time.Time
+
+	// Now returns the current clock time.
+	Now() time.Time
 }
 
 // Spec defines the name of the mutex and behaviour of the Acquire function.
@@ -36,19 +39,24 @@ type Spec struct {
 	// Name is required, and must start with a letter and contain at most
 	// 40 letters, numbers or dashes.
 	Name string
+
 	// Clock must be provided and is exposed for testing purposes.
 	Clock Clock
-	// Delay defines how often to check for lock acquisition. The implementation
-	// calls all fail fast, so acquisition requires polling.
+
+	// Delay defines how often to check for lock acquisition, for
+	// compatibility code that requires polling.
 	Delay time.Duration
-	// Timeout allows the caller to specify how long to wait.
+
+	// Timeout allows the caller to specify how long to wait. If Timeout
+	// is zero, then the call will block forever.
 	Timeout time.Duration
+
 	// Cancel if signalled will cause the Acquire method to return with ErrCancelled.
 	Cancel <-chan struct{}
 }
 
-// Acquire will attempt to acquire the named mutex. If the Timout value is
-// hit, ErrTimeout is returned. If the Cancel channel is signalled,
+// Acquire will attempt to acquire the named mutex. If the Timout value
+// is hit, ErrTimeout is returned. If the Cancel channel is signalled,
 // ErrCancelled is returned.
 func Acquire(spec Spec) (Releaser, error) {
 	if err := spec.Validate(); err != nil {
@@ -60,21 +68,36 @@ func Acquire(spec Spec) (Releaser, error) {
 		timeout = spec.Clock.After(spec.Timeout)
 	}
 
-	for {
-		impl, err := acquire(spec.Name)
-		if err == nil {
-			return impl, nil
-		} else if err != errLocked {
-			return nil, errors.Trace(err)
-		}
-		select {
-		case <-timeout:
-			return nil, ErrTimeout
-		case <-spec.Cancel:
-			return nil, ErrCancelled
-		case <-spec.Clock.After(spec.Delay):
-			// no-op, continue and try again
-		}
+	m1, err := acquire(spec, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	// NOTE(axw) for compatibility with older versions of Juju,
+	// we must also acquire a legacy mutex. We acquire the new
+	// version first, since that provides the preferred blocking
+	// behaviour.
+	m2, err := acquireLegacy(
+		spec.Name,
+		spec.Clock,
+		spec.Delay,
+		timeout,
+		spec.Cancel,
+	)
+	if err != nil {
+		m1.Release()
+		return nil, err
+	}
+
+	return releasers{m1, m2}, nil
+}
+
+type releasers []Releaser
+
+// Release is part of the Releaser interface.
+func (rs releasers) Release() {
+	for _, r := range rs {
+		r.Release()
 	}
 }
 
