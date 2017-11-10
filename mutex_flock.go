@@ -68,7 +68,7 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 
 	flockName := filepath.Join(os.TempDir(), "juju-"+name)
 	flock := func() (Releaser, error) {
-		fd, err := syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY, 0600)
+		fd, err := syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

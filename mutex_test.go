@@ -265,6 +265,25 @@ func (s *mutexSuite) TestStress(c *gc.C) {
 	c.Assert(*counter, gc.Equals, int64(lockAttempts*concurrentLocks))
 }
 
+// TestMutexNotInherited tests that subprocesses do not inherit mutexes.
+func (s *mutexSuite) TestMutexNotInherited(c *gc.C) {
+	spec := s.spec()
+	r, err := mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	defer r.Release()
+
+	kill := make(chan struct{})
+	SleepFromAnotherProc(c, kill)
+	defer close(kill)
+	r.Release()
+
+	// We should be able to acquire again now.
+	spec.Timeout = time.Nanosecond
+	r, err = mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	r.Release()
+}
+
 // LockFromAnotherProc will launch a process and block until that process has
 // created the lock file.  If we time out waiting for the other process to take
 // the lock, this function will fail the current test.
@@ -328,6 +347,59 @@ func LockFromAnotherProc(c *gc.C, name string, kill chan struct{}, wait, unlock 
 	return done
 }
 
+// SleepFromAnotherProc will launch a process and cause it to sleep
+// for a minute, to prove that subprocesses do not inherit the mutex.
+func SleepFromAnotherProc(c *gc.C, kill chan struct{}) (done chan struct{}) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	c.Assert(err, jc.ErrorIsNil)
+	defer listener.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run", "TestSleepFromOtherProcess")
+	cmd.Env = append(
+		// We must preserve os.Environ() on Windows,
+		// or the subprocess will fail in weird and
+		// wonderful ways.
+		os.Environ(),
+		"MUTEX_TEST_HELPER_WANTED=1",
+		"MUTEX_TEST_HELPER_ADDR="+listener.Addr().String(),
+	)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	c.Assert(cmd.Start(), jc.ErrorIsNil)
+
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		cmd.Wait()
+	}()
+	go func() {
+		select {
+		case <-kill:
+			cmd.Process.Kill()
+		case <-done:
+		}
+	}()
+
+	started := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if c.Check(err, jc.ErrorIsNil) {
+			// Just close it, the signal is enough.
+			conn.Close()
+			close(started)
+		}
+	}()
+	select {
+	case <-started:
+	case <-done:
+		c.Fatalf("other process exited")
+	case <-time.After(appWait):
+		c.Fatalf("timed out waiting for other process to connect")
+	}
+
+	return done
+}
+
 func TestLockFromOtherProcess(t *testing.T) {
 	if os.Getenv("MUTEX_TEST_HELPER_WANTED") == "" {
 		return
@@ -363,6 +435,20 @@ func TestLockFromOtherProcess(t *testing.T) {
 	if unlock {
 		r.Release()
 	}
+	os.Exit(0)
+}
+
+func TestSleepFromOtherProcess(t *testing.T) {
+	if os.Getenv("MUTEX_TEST_HELPER_WANTED") == "" {
+		return
+	}
+	addr := os.Getenv("MUTEX_TEST_HELPER_ADDR")
+	_, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error notifying primary process: %v", err)
+		os.Exit(1)
+	}
+	time.Sleep(time.Minute)
 	os.Exit(0)
 }
 
