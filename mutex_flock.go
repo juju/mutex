@@ -8,6 +8,7 @@ package mutex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -67,8 +68,45 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 	}
 
 	flockName := filepath.Join(os.TempDir(), "juju-"+name)
+	chownFromRoot := func() (err error) {
+		if cmd, ok := os.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
+			var uid, gid int
+			uid, err = strconv.Atoi(os.Getenv("SUDO_UID"))
+			if err != nil {
+				err = errors.Annotate(err, "parsing SUDO_UID")
+				return
+			}
+			gid, err = strconv.Atoi(os.Getenv("SUDO_GID"))
+			if err != nil {
+				err = errors.Annotate(err, "parsing SUDO_GID")
+				return
+			}
+			return syscall.Chown(flockName, uid, gid)
+		}
+		return nil
+	}
+	open := func() (fd int, err error) {
+		fd, err = syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
+		if err != nil {
+			if os.IsPermission(err) {
+				err = errors.Annotatef(err, "unable to open %s", flockName)
+			}
+			return
+		}
+		// Attemptting to open a lock file as root whilst using sudo can cause
+		// the lock file to have the wrong permissions. Subsequent calls to
+		// acquire the lock file can then lead to cryptic error messages. Let's
+		// attempt to help people out, either by correcting the permissions, or
+		// explaining why we can't help them.
+		// info: lp 1758369
+		if chownErr := chownFromRoot(); chownErr != nil {
+			// The file has the wrong permissions, but we should let the acquire
+			// continue.
+		}
+		return
+	}
 	flock := func() (Releaser, error) {
-		fd, err := syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
+		fd, err := open()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

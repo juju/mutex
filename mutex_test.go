@@ -8,9 +8,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -284,6 +287,27 @@ func (s *mutexSuite) TestMutexNotInherited(c *gc.C) {
 	r.Release()
 }
 
+// TestFilePermissions tests that the file permissions are correct.
+func (s *mutexSuite) TestFilePermissions(c *gc.C) {
+	spec := s.spec()
+	r, err := mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	defer r.Release()
+
+	filePath := filepath.Join(os.TempDir(), "juju-"+spec.Name)
+	fileInfo, err := os.Stat(filePath)
+	c.Assert(err, jc.ErrorIsNil)
+
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	c.Assert(ok, jc.IsTrue)
+
+	current, err := user.Current()
+	c.Assert(err, jc.ErrorIsNil)
+
+	c.Assert(fmt.Sprintf("%d", stat.Uid), gc.Equals, current.Uid)
+	c.Assert(fmt.Sprintf("%d", stat.Gid), gc.Equals, current.Gid)
+}
+
 // LockFromAnotherProc will launch a process and block until that process has
 // created the lock file.  If we time out waiting for the other process to take
 // the lock, this function will fail the current test.
@@ -445,7 +469,7 @@ func TestSleepFromOtherProcess(t *testing.T) {
 	addr := os.Getenv("MUTEX_TEST_HELPER_ADDR")
 	_, err := net.Dial("tcp", addr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error notifying primary process: %v", err)
+		fmt.Fprintf(os.Stderr, "error notifying primary process: %v \n", err)
 		os.Exit(1)
 	}
 	time.Sleep(time.Minute)
