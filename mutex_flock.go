@@ -93,11 +93,11 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 			}
 			return
 		}
-		// Attemptting to open a lock file as root whilst using sudo can cause
-		// the lock file to have the wrong permissions. Subsequent calls to
-		// acquire the lock file can then lead to cryptic error messages. Let's
-		// attempt to help people out, either by correcting the permissions, or
-		// explaining why we can't help them.
+		// Attempting to open a lock file as root whilst using sudo can cause
+		// the lock file to have the wrong permissions for a non-sudo user.
+		// Subsequent calls to acquire the lock file can then lead to cryptic
+		// error messages. Let's attempt to help people out, either by
+		// correcting the permissions, or explaining why we can't help them.
 		// info: lp 1758369
 		if chownErr := chownFromRoot(); chownErr != nil {
 			// The file has the wrong permissions, but we should let the acquire
