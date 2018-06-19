@@ -20,7 +20,7 @@ func acquire(spec Spec, timeout <-chan time.Time) (Releaser, error) {
 	done := make(chan struct{})
 	defer close(done)
 	select {
-	case result := <-acquireFlock(spec.Name, envars, done):
+	case result := <-acquireFlock(spec.Name, done):
 		if result.err != nil {
 			return nil, errors.Trace(result.err)
 		}
@@ -58,7 +58,7 @@ type acquireResult struct {
 // an unbounded collection of goroutines, we ensure that there is
 // only one goroutine making a flock syscall at a time, per mutex
 // name.
-func acquireFlock(name string, environ Environment, done <-chan struct{}) <-chan acquireResult {
+func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 	result := make(chan acquireResult)
 	w := &waiter{result, done}
 
@@ -71,13 +71,13 @@ func acquireFlock(name string, environ Environment, done <-chan struct{}) <-chan
 
 	flockName := filepath.Join(os.TempDir(), "juju-"+name)
 	chownFromRoot := func() error {
-		if cmd, ok := environ.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
+		if cmd, ok := envars.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
 			var uid, gid int
-			uid, err := strconv.Atoi(environ.Getenv("SUDO_UID"))
+			uid, err := strconv.Atoi(envars.Getenv("SUDO_UID"))
 			if err != nil {
 				return errors.Annotate(err, "parsing SUDO_UID")
 			}
-			gid, err = strconv.Atoi(environ.Getenv("SUDO_GID"))
+			gid, err = strconv.Atoi(envars.Getenv("SUDO_GID"))
 			if err != nil {
 				return errors.Annotate(err, "parsing SUDO_GID")
 			}
