@@ -8,6 +8,7 @@ package mutex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ func acquire(spec Spec, timeout <-chan time.Time) (Releaser, error) {
 		return nil, ErrCancelled
 	}
 }
+
+var envars Environment = osEnvironment{}
 
 var (
 	mu     sync.Mutex
@@ -67,8 +70,43 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 	}
 
 	flockName := filepath.Join(os.TempDir(), "juju-"+name)
-	flock := func() (Releaser, error) {
+	chownFromRoot := func() error {
+		if cmd, ok := envars.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
+			var uid, gid int
+			uid, err := strconv.Atoi(envars.Getenv("SUDO_UID"))
+			if err != nil {
+				return errors.Annotate(err, "parsing SUDO_UID")
+			}
+			gid, err = strconv.Atoi(envars.Getenv("SUDO_GID"))
+			if err != nil {
+				return errors.Annotate(err, "parsing SUDO_GID")
+			}
+			return syscall.Chown(flockName, uid, gid)
+		}
+		return nil
+	}
+	open := func() (int, error) {
 		fd, err := syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
+		if err != nil {
+			if os.IsPermission(err) {
+				err = errors.Annotatef(err, "unable to open %s", flockName)
+			}
+			return fd, err
+		}
+		// Attempting to open a lock file as root whilst using sudo can cause
+		// the lock file to have the wrong permissions for a non-sudo user.
+		// Subsequent calls to acquire the lock file can then lead to cryptic
+		// error messages. Let's attempt to help people out, either by
+		// correcting the permissions, or explaining why we can't help them.
+		// info: lp 1758369
+		if chownErr := chownFromRoot(); chownErr != nil {
+			// The file has the wrong permissions, but we should let the acquire
+			// continue.
+		}
+		return fd, err
+	}
+	flock := func() (Releaser, error) {
+		fd, err := open()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -135,4 +173,29 @@ func (m *mutex) Release() {
 		panic(err)
 	}
 	m.fd = 0
+}
+
+// Environment defines a simple interface with interacting with environmental
+// variables.
+//go:generate mockgen -package mutex_test -destination mutex_mock_test.go github.com/juju/mutex Environment
+type Environment interface {
+
+	// LookupEnv retrieves the value of the environment variable named
+	// by the key.
+	LookupEnv(string) (string, bool)
+
+	// Getenv retrieves the value of the environment variable named by the key.
+	Getenv(string) string
+}
+
+// osEnvironment provides a default way to access environmental values to the
+// acquire method.
+type osEnvironment struct{}
+
+func (osEnvironment) LookupEnv(key string) (string, bool) {
+	return os.LookupEnv(key)
+}
+
+func (osEnvironment) Getenv(key string) string {
+	return os.Getenv(key)
 }
