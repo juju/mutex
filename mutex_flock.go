@@ -20,7 +20,7 @@ func acquire(spec Spec, timeout <-chan time.Time) (Releaser, error) {
 	done := make(chan struct{})
 	defer close(done)
 	select {
-	case result := <-acquireFlock(spec.Name, done):
+	case result := <-acquireFlock(spec.Name, envars, done):
 		if result.err != nil {
 			return nil, errors.Trace(result.err)
 		}
@@ -31,6 +31,8 @@ func acquire(spec Spec, timeout <-chan time.Time) (Releaser, error) {
 		return nil, ErrCancelled
 	}
 }
+
+var envars Environment = osEnvironment{}
 
 var (
 	mu     sync.Mutex
@@ -56,7 +58,7 @@ type acquireResult struct {
 // an unbounded collection of goroutines, we ensure that there is
 // only one goroutine making a flock syscall at a time, per mutex
 // name.
-func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
+func acquireFlock(name string, environ Environment, done <-chan struct{}) <-chan acquireResult {
 	result := make(chan acquireResult)
 	w := &waiter{result, done}
 
@@ -68,30 +70,28 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 	}
 
 	flockName := filepath.Join(os.TempDir(), "juju-"+name)
-	chownFromRoot := func() (err error) {
-		if cmd, ok := os.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
+	chownFromRoot := func() error {
+		if cmd, ok := environ.LookupEnv("SUDO_COMMAND"); ok && cmd != "" {
 			var uid, gid int
-			uid, err = strconv.Atoi(os.Getenv("SUDO_UID"))
+			uid, err := strconv.Atoi(environ.Getenv("SUDO_UID"))
 			if err != nil {
-				err = errors.Annotate(err, "parsing SUDO_UID")
-				return
+				return errors.Annotate(err, "parsing SUDO_UID")
 			}
-			gid, err = strconv.Atoi(os.Getenv("SUDO_GID"))
+			gid, err = strconv.Atoi(environ.Getenv("SUDO_GID"))
 			if err != nil {
-				err = errors.Annotate(err, "parsing SUDO_GID")
-				return
+				return errors.Annotate(err, "parsing SUDO_GID")
 			}
 			return syscall.Chown(flockName, uid, gid)
 		}
 		return nil
 	}
-	open := func() (fd int, err error) {
-		fd, err = syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
+	open := func() (int, error) {
+		fd, err := syscall.Open(flockName, syscall.O_CREAT|syscall.O_RDONLY|syscall.O_CLOEXEC, 0600)
 		if err != nil {
 			if os.IsPermission(err) {
 				err = errors.Annotatef(err, "unable to open %s", flockName)
 			}
-			return
+			return fd, err
 		}
 		// Attempting to open a lock file as root whilst using sudo can cause
 		// the lock file to have the wrong permissions for a non-sudo user.
@@ -103,7 +103,7 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 			// The file has the wrong permissions, but we should let the acquire
 			// continue.
 		}
-		return
+		return fd, err
 	}
 	flock := func() (Releaser, error) {
 		fd, err := open()
@@ -173,4 +173,29 @@ func (m *mutex) Release() {
 		panic(err)
 	}
 	m.fd = 0
+}
+
+// Environment defines a simple interface with interacting with environmental
+// variables.
+//go:generate mockgen -package mutex_test -destination mutex_mock_test.go github.com/juju/mutex Environment
+type Environment interface {
+
+	// LookupEnv retrieves the value of the environment variable named
+	// by the key.
+	LookupEnv(string) (string, bool)
+
+	// Getenv retrieves the value of the environment variable named by the key.
+	Getenv(string) string
+}
+
+// osEnvironment provides a default way to access environmental values to the
+// acquire method.
+type osEnvironment struct{}
+
+func (osEnvironment) LookupEnv(key string) (string, bool) {
+	return os.LookupEnv(key)
+}
+
+func (osEnvironment) Getenv(key string) string {
+	return os.Getenv(key)
 }

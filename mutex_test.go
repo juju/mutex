@@ -17,6 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
+
+	jt "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 
@@ -303,6 +306,40 @@ func (s *mutexSuite) TestFilePermissions(c *gc.C) {
 
 	current, err := user.Current()
 	c.Assert(err, jc.ErrorIsNil)
+
+	c.Assert(fmt.Sprintf("%d", stat.Uid), gc.Equals, current.Uid)
+	c.Assert(fmt.Sprintf("%d", stat.Gid), gc.Equals, current.Gid)
+}
+
+// TestFilePermissionsWithSudo tests that the file permissions are correct.
+func (s *mutexSuite) TestFilePermissionsWithSudoEnvars(c *gc.C) {
+	ctrl := gomock.NewController(c)
+	defer ctrl.Finish()
+
+	envion := NewMockEnvironment(ctrl)
+
+	restore := jt.PatchValue(mutex.Envars, envion)
+	defer restore()
+
+	current, err := user.Current()
+	c.Assert(err, jc.ErrorIsNil)
+
+	exp := envion.EXPECT()
+	exp.LookupEnv("SUDO_COMMAND").Return("test", true)
+	exp.Getenv("SUDO_UID").Return(current.Uid)
+	exp.Getenv("SUDO_GID").Return(current.Gid)
+
+	spec := s.spec()
+	r, err := mutex.Acquire(spec)
+	c.Assert(err, jc.ErrorIsNil)
+	defer r.Release()
+
+	filePath := filepath.Join(os.TempDir(), "juju-"+spec.Name)
+	fileInfo, err := os.Stat(filePath)
+	c.Assert(err, jc.ErrorIsNil)
+
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	c.Assert(ok, jc.IsTrue)
 
 	c.Assert(fmt.Sprintf("%d", stat.Uid), gc.Equals, current.Uid)
 	c.Assert(fmt.Sprintf("%d", stat.Gid), gc.Equals, current.Gid)
