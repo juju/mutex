@@ -1,7 +1,7 @@
 default: check
 
 check:
-	go test
+	go test -race
 
 docs:
 	godoc2md github.com/juju/mutex > README.md
