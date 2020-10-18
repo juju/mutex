@@ -114,7 +114,7 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 			syscall.Close(fd)
 			return nil, errors.Trace(err)
 		}
-		return &mutex{fd: fd}, nil
+		return &mutex{fd: fd, name: flockName}, nil
 	}
 	acquire := func() bool {
 		releaser, err := flock()
@@ -157,8 +157,9 @@ func acquireFlock(name string, done <-chan struct{}) <-chan acquireResult {
 
 // mutex implements Releaser using the flock syscall.
 type mutex struct {
-	mu sync.Mutex
-	fd int
+	mu   sync.Mutex
+	fd   int
+	name string
 }
 
 // Release is part of the Releaser interface.
@@ -173,6 +174,7 @@ func (m *mutex) Release() {
 		panic(err)
 	}
 	m.fd = 0
+	os.Remove(m.name)
 }
 
 // Environment defines a simple interface with interacting with environmental
