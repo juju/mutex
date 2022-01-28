@@ -1,7 +1,7 @@
 // Copyright 2016-2017 Canonical Ltd.
 // Licensed under the LGPLv3, see LICENCE file for details.
 
-// +build !windows
+//go:build !windows
 
 package mutex
 

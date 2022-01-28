@@ -1,7 +1,7 @@
 
 
 # mutex
-`import "github.com/juju/mutex"`
+`import "github.com/juju/mutex/v2"`
 
 * [Overview](#pkg-overview)
 * [Index](#pkg-index)
@@ -15,8 +15,7 @@ acquired at the same time, within and across process boundaries. If a
 process dies while the mutex is held, the mutex is automatically released.
 
 The Linux/MacOS implementation uses flock, while the Windows implementation
-uses a named mutex. On Linux, we also acquire an abstract domain socket for
-compatibility with older implementations.
+uses a named mutex.
 
 
 
