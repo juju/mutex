@@ -68,37 +68,7 @@ func Acquire(spec Spec) (Releaser, error) {
 		timeout = spec.Clock.After(spec.Timeout)
 	}
 
-	m1, err := acquire(spec, timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	// NOTE(axw) for compatibility with older versions of Juju,
-	// we must also acquire a legacy mutex. We acquire the new
-	// version first, since that provides the preferred blocking
-	// behaviour.
-	m2, err := acquireLegacy(
-		spec.Name,
-		spec.Clock,
-		spec.Delay,
-		timeout,
-		spec.Cancel,
-	)
-	if err != nil {
-		m1.Release()
-		return nil, err
-	}
-
-	return releasers{m1, m2}, nil
-}
-
-type releasers []Releaser
-
-// Release is part of the Releaser interface.
-func (rs releasers) Release() {
-	for _, r := range rs {
-		r.Release()
-	}
+	return acquire(spec, timeout)
 }
 
 // Validate checks the attributes of Spec for validity.
