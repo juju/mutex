@@ -4,14 +4,11 @@
 package mutex
 
 import (
-	"regexp"
+	"crypto/sha1"
+	"fmt"
 	"time"
 
 	"github.com/juju/errors"
-)
-
-var (
-	validName = regexp.MustCompile("^[a-zA-Z][a-zA-Z0-9-]*$")
 )
 
 // Releaser defines the Release method that is the only thing that can be done
@@ -36,8 +33,7 @@ type Clock interface {
 
 // Spec defines the name of the mutex and behaviour of the Acquire function.
 type Spec struct {
-	// Name is required, and must start with a letter and contain at most
-	// 40 letters, numbers or dashes.
+	// Name is required.
 	Name string
 
 	// Clock must be provided and is exposed for testing purposes.
@@ -73,11 +69,8 @@ func Acquire(spec Spec) (Releaser, error) {
 
 // Validate checks the attributes of Spec for validity.
 func (s *Spec) Validate() error {
-	if len(s.Name) > 40 {
-		return errors.NotValidf("Name longer than 40 characters")
-	}
-	if !validName.MatchString(s.Name) {
-		return errors.NotValidf("Name %q", s.Name)
+	if s.Name == "" {
+		return errors.NotValidf("missing Name")
 	}
 	if s.Clock == nil {
 		return errors.NotValidf("missing Clock")
@@ -89,4 +82,11 @@ func (s *Spec) Validate() error {
 		return errors.NotValidf("negative Timeout")
 	}
 	return nil
+}
+
+// GetMutexName returns the internal name of the mutex
+func (s *Spec) GetMutexName() string {
+	h := sha1.New()
+	h.Write([]byte(s.Name))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
