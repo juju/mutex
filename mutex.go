@@ -4,7 +4,7 @@
 package mutex
 
 import (
-	"crypto/sha1"
+	"crypto/md5"
 	"fmt"
 	"time"
 
@@ -12,7 +12,7 @@ import (
 )
 
 // Releaser defines the Release method that is the only thing that can be done
-// to a acquired mutex.
+// to an acquired mutex.
 type Releaser interface {
 	// Release releases the mutex. Release may be called multiple times, but
 	// only the first call will release this instance of the mutex. Release is
@@ -35,6 +35,19 @@ type Clock interface {
 type Spec struct {
 	// Name is required.
 	Name string
+
+	// Prefix can be used to control the mutex scope.
+	//
+	// For example:
+	//
+	// r, _ := mutex.Acquire(Spec{Prefix: "p0", Name: "n", Clock: clock.WallClock, Delay: time.Second})
+	// defer r.Release()
+	//
+	// r, _ := mutex.Acquire(Spec{Prefix: "p1", Name: "n", Clock: clock.WallClock, Delay: time.Second})
+	// defer r.Release()
+	//
+	// // This line will be executed immediately because we are acquiring locks in different scopes.
+	Prefix string
 
 	// Clock must be provided and is exposed for testing purposes.
 	Clock Clock
@@ -72,6 +85,9 @@ func (s *Spec) Validate() error {
 	if s.Name == "" {
 		return errors.NotValidf("missing Name")
 	}
+	if len(s.Prefix) > 7 {
+		return errors.NotValidf("prefix length cannot be greater than 7")
+	}
 	if s.Clock == nil {
 		return errors.NotValidf("missing Clock")
 	}
@@ -86,7 +102,16 @@ func (s *Spec) Validate() error {
 
 // GetMutexName returns the internal name of the mutex
 func (s *Spec) GetMutexName() string {
-	h := sha1.New()
+	h := md5.New()
 	h.Write([]byte(s.Name))
-	return fmt.Sprintf("%x", h.Sum(nil))
+
+	// The MD5 hash is 32 chars long
+	// We can fit up to 40 charts with the prefix,
+	// so we can use up to 7 chars plus the dash.
+	prefix := "mutex"
+	if s.Prefix != "" {
+		prefix = s.Prefix
+	}
+
+	return fmt.Sprintf("%s-%x", prefix, h.Sum(nil))
 }
