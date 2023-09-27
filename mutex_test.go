@@ -42,20 +42,15 @@ func (s *mutexSuite) TestSpecValidity(c *gc.C) {
 		err  string
 	}{{
 		spec: mutex.Spec{Name: "", Clock: &fakeClock{}, Delay: time.Millisecond},
-		err:  `Name "" not valid`,
-	}, {
-		spec: mutex.Spec{Name: "42", Clock: &fakeClock{}, Delay: time.Millisecond},
-		err:  `Name "42" not valid`,
+		err:  `missing Name not valid`,
 	}, {
 		spec: mutex.Spec{Name: "a", Clock: &fakeClock{}, Delay: time.Millisecond},
 	}, {
-		spec: mutex.Spec{Name: "a very very long name that is over the length limit", Clock: &fakeClock{}, Delay: time.Millisecond},
-		err:  `Name longer than 40 characters not valid`,
+		spec: mutex.Spec{Name: "a very very long name", Clock: &fakeClock{}, Delay: time.Millisecond},
 	}, {
-		spec: mutex.Spec{Name: "test-42", Clock: &fakeClock{}, Delay: time.Millisecond},
+		spec: mutex.Spec{Name: "a-name-with-dashes", Clock: &fakeClock{}, Delay: time.Millisecond},
 	}, {
-		spec: mutex.Spec{Name: "with a space", Clock: &fakeClock{}, Delay: time.Millisecond},
-		err:  `Name "with a space" not valid`,
+		spec: mutex.Spec{Name: "a name with spaces", Clock: &fakeClock{}, Delay: time.Millisecond},
 	}, {
 		spec: mutex.Spec{Name: "test-42", Delay: time.Millisecond},
 		err:  `missing Clock not valid`,
@@ -297,7 +292,7 @@ func (s *mutexSuite) TestFilePermissions(c *gc.C) {
 	c.Assert(err, jc.ErrorIsNil)
 	defer r.Release()
 
-	filePath := filepath.Join(os.TempDir(), "juju-"+spec.Name)
+	filePath := filepath.Join(os.TempDir(), "juju-"+spec.GetMutexName())
 	fileInfo, err := os.Stat(filePath)
 	c.Assert(err, jc.ErrorIsNil)
 
@@ -334,7 +329,7 @@ func (s *mutexSuite) TestFilePermissionsWithSudoEnvars(c *gc.C) {
 	c.Assert(err, jc.ErrorIsNil)
 	defer r.Release()
 
-	filePath := filepath.Join(os.TempDir(), "juju-"+spec.Name)
+	filePath := filepath.Join(os.TempDir(), "juju-"+spec.GetMutexName())
 	fileInfo, err := os.Stat(filePath)
 	c.Assert(err, jc.ErrorIsNil)
 

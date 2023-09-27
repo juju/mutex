@@ -48,7 +48,7 @@ func acquire(spec Spec, timeoutCh <-chan time.Time) (Releaser, error) {
 	}
 
 	m := &mutex{
-		name:     spec.Name,
+		name:     spec.GetMutexName(),
 		release:  make(chan struct{}),
 		released: make(chan struct{}),
 	}

@@ -4,18 +4,15 @@
 package mutex
 
 import (
-	"regexp"
+	"crypto/md5"
+	"fmt"
 	"time"
 
 	"github.com/juju/errors"
 )
 
-var (
-	validName = regexp.MustCompile("^[a-zA-Z][a-zA-Z0-9-]*$")
-)
-
 // Releaser defines the Release method that is the only thing that can be done
-// to a acquired mutex.
+// to an acquired mutex.
 type Releaser interface {
 	// Release releases the mutex. Release may be called multiple times, but
 	// only the first call will release this instance of the mutex. Release is
@@ -36,9 +33,21 @@ type Clock interface {
 
 // Spec defines the name of the mutex and behaviour of the Acquire function.
 type Spec struct {
-	// Name is required, and must start with a letter and contain at most
-	// 40 letters, numbers or dashes.
+	// Name is required.
 	Name string
+
+	// Prefix can be used to control the mutex scope.
+	//
+	// For example:
+	//
+	// r, _ := mutex.Acquire(Spec{Prefix: "p0", Name: "n", Clock: clock.WallClock, Delay: time.Second})
+	// defer r.Release()
+	//
+	// r, _ := mutex.Acquire(Spec{Prefix: "p1", Name: "n", Clock: clock.WallClock, Delay: time.Second})
+	// defer r.Release()
+	//
+	// // This line will be executed immediately because we are acquiring locks in different scopes.
+	Prefix string
 
 	// Clock must be provided and is exposed for testing purposes.
 	Clock Clock
@@ -73,11 +82,11 @@ func Acquire(spec Spec) (Releaser, error) {
 
 // Validate checks the attributes of Spec for validity.
 func (s *Spec) Validate() error {
-	if len(s.Name) > 40 {
-		return errors.NotValidf("Name longer than 40 characters")
+	if s.Name == "" {
+		return errors.NotValidf("missing Name")
 	}
-	if !validName.MatchString(s.Name) {
-		return errors.NotValidf("Name %q", s.Name)
+	if len(s.Prefix) > 7 {
+		return errors.NotValidf("prefix length cannot be greater than 7")
 	}
 	if s.Clock == nil {
 		return errors.NotValidf("missing Clock")
@@ -89,4 +98,20 @@ func (s *Spec) Validate() error {
 		return errors.NotValidf("negative Timeout")
 	}
 	return nil
+}
+
+// GetMutexName returns the internal name of the mutex
+func (s *Spec) GetMutexName() string {
+	h := md5.New()
+	h.Write([]byte(s.Name))
+
+	// The MD5 hash is 32 chars long
+	// We can fit up to 40 charts with the prefix,
+	// so we can use up to 7 chars plus the dash.
+	prefix := "mutex"
+	if s.Prefix != "" {
+		prefix = s.Prefix
+	}
+
+	return fmt.Sprintf("%s-%x", prefix, h.Sum(nil))
 }

@@ -21,7 +21,7 @@ func acquire(spec Spec, timeout <-chan time.Time) (Releaser, error) {
 	done := make(chan struct{})
 	defer close(done)
 	select {
-	case result := <-acquireFlock(spec.Name, done):
+	case result := <-acquireFlock(spec.GetMutexName(), done):
 		if result.err != nil {
 			return nil, errors.Trace(result.err)
 		}
@@ -178,6 +178,7 @@ func (m *mutex) Release() {
 
 // Environment defines a simple interface with interacting with environmental
 // variables.
+//
 //go:generate mockgen -package mutex_test -destination mutex_mock_test.go github.com/juju/mutex Environment
 type Environment interface {
 
